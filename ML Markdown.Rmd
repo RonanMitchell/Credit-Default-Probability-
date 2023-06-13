@@ -14,20 +14,22 @@ header-includes:
   - \usepackage{fontspec}
   - \setmainfont{Times New Roman}
   - \justifying
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r Setup, include = FALSE}
 
-tinytex::install_tinytex(force = TRUE)
-options(repos = "https://cran.mirror.ac.za/")
+#tinytex::install_tinytex(force = TRUE)
+#options(repos = "https://cran.mirror.ac.za/")
 
 #Installing Packages 
 
-install.packages("caret")
-install.packages("tidyverse")
-install.packages("ggplot2")
-install.packages("randomForest")
-install.packages("glmnet")
+#install.packages("caret")
+#install.packages("tidyverse")
+#install.packages("ggplot2")
+#install.packages("randomForest")
+#install.packages("glmnet")
 
 ```
 
@@ -35,26 +37,57 @@ install.packages("glmnet")
 
 rm(list = ls())
 
+# The full set
+
 Data <- read.csv("Data/Credit Default Dataset.csv")
 Data <- na.omit(Data)
+Data <- subset(Data, Amount != 0)
+Data <- subset(Data, Age >= 22 & Age < 65)
+
+# Specific Columns
 
 Data$Gender <- gsub("2", "0", Data$Gender) # 0 == Female 
 
-Data$Education <- gsub("3|4|5|6", "0", Data$Education) 
-    Data$Education <- gsub("2|1", "1", Data$Education) # Uni+ == 1
+Data$Education <- gsub("4|5|6", "0", Data$Education) 
+    Data$Education <- gsub("2|1", "2", Data$Education) # Uni+ = 2, HS = 1
+    Data$Education <- gsub("3", "1", Data$Education)
 
-Data$Marriage.Status <- gsub("2|3", "0", Data$Marriage.Status) 
+Data$Marriage.Status <- gsub("2|3", "0", Data$Marriage.Status)# Married = 1
 
-Data$Quality <- (Data[, 6] + 
+Data$Quality <- ((Data[, 6] + 
                 Data[, 7] + 
                 Data[, 8] +
                 Data[, 9] +
                 Data[, 10] +
-                Data[, 11]) # Only for regressions, not ML.  
+                Data[, 11]))/6 # pay before, on time, or late. (average)
+
+Data$Quality <- ifelse(Data$Quality < -1, 2,
+                ifelse(Data$Quality < 0 & Data$Quality >= -1, 1,
+                ifelse(Data$Quality > 0 & Data$Quality < 2, -1, 
+                ifelse(Data$Quality >= 2, -2,0))))
+
+Data$Owed <- rowSums(Data[,c(12,13,14,15,16,17)])
+Data <- subset(Data, Owed != 0)
+
+Data$TotalPaid <- rowSums(Data[,c(18,19,20,21,22,23)])
+
+Data$Difference <- (Data$Owed - Data$TotalPaid)
+
+Data <- subset(Data, Owed != 0)
+Data <- subset(Data, Amount != 0)
+Data <- subset(Data, Age >= 22 & Age < 65)
+
+# Interactions
 
 Data <- as.data.frame(lapply(Data, as.numeric))
 
-Standardised <- c(1, 5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23)
+Data$IntAgeMarr <- Data$Age*Data$Marriage.Status
+Data$IntEducAmt <- Data$Education*Data$Amount
+Data$IntEducQua <- Data$Education*Data$Quality
+Data$IntAgeAmt <- Data$Age*Data$Amount
+Data$GenAmt <- Data$Gender*Data$Amount
+
+Standardised <- c(1, 28, 5, 29)
 
 Process <- function(a, b) {
   b[, a] <- scale(b[, a])
@@ -64,37 +97,60 @@ Process <- function(a, b) {
 Process(Standardised, Data) # Standardised Data
 rm(Standardised)
 
-# All monetary sums have been standardised (subtract mean and divide by standard deviation) 
-# Must undo this when substituting in values.
-
-NewData <- NewData[,-25]
-
-# All variables now range between -2 and 2. Most are around 1. Comparison is fine!
+#Monetary sums have either been logged (amount loaned) or standardised.
 
 ```
 
 ```{r Feautre Selection, include=FALSE}
 
 library(glmnet)
-
-
-
-```
-
-
-```{r ML Model, include=FALSE}
-
 library(caret)
 
 set.seed(123)  
-Training <- createDataPartition(NewData$Default..Outcome., p = 0.7, list = FALSE)
-Train <- Data[Training, ]
-Test <- Data[-Training, ]
+Training <- createDataPartition(NewData$Default..Outcome., p = 0.8, list = FALSE)
+Train <- NewData[Training, ]
+Test <- NewData[-Training, ]
 
-###
+X <- as.matrix(Train[, -24])
+Y <- Train$Default..Outcome.
+
+#  elastic net model
+ElasticNet <- glmnet(X, Y, family = "binomial", alpha = 0.5)
+
+# cross-validation
+CV <- cv.glmnet(X, Y, family = "binomial", alpha = 0.5)
+TrueL <- CV$lambda.min
+
+ElasticFinal <- glmnet(X, Y, family = "binomial", alpha = 0.5, lambda = TrueL)
+
+# Final Features
+
+Features <- rownames(coef(ElasticFinal))[coef(ElasticFinal)[, 1] != 0]
+
+print(Features)
+
+Pred2 <- predict(ElasticFinal, newx = as.matrix(Test[, -which(names(Test) == "Default..Outcome.")]), type = "response")
+Pred2 <- ifelse(Pred2 >= 0.5, 1, 0)
+
+Success <- sum(Pred2[Test$Default..Outcome. == 1] == 1) / sum(Test$Default..Outcome. == 1)
+
+Fail <- sum(Pred2[Test$Default..Outcome. == 0] == 0) / sum(Test$Default..Outcome. == 0)
+
+print(c(Success, Fail))
+
+```
+
+```{r ML Model, include=FALSE}
+
 library(randomForest)
 
-MLModel <- randomForest(Default..Outcome. ~ ., data = Train, ntree = 200)
+MLModel <- randomForest(
+  Default..Outcome. ~ ., 
+  data = Train, 
+  ntree = 100,
+  mtry = 5,
+  nodesize = 50, 
+  maxdepth = 50)
 
 ###
 
@@ -107,7 +163,7 @@ Fail <- sum(Predict[Test$Default..Outcome. == 0] == 0) / sum(Test$Default..Outco
 
 print(c(Success, Fail))
 
-# Current Stage: very bad. Only predicts 37% of defaults. Very very bad man.
+# End the day off at 38%.  
 
 ```
 

@@ -1,0 +1,963 @@
+---
+title: "Prediction of Loan Defaults Via Machine Learning Techniques"
+author: "Ronan Morris"
+date: "2023/06/26"
+output:
+  html_document:
+    css: style.css
+    pandoc_args: ["-V", "title-centering=true"]
+editor_options:
+  chunk_output_type: console
+---
+
+```{r Setup, include = FALSE}
+tinytex::install_tinytex(force = TRUE)
+options(repos = "https://cran.mirror.ac.za/")
+
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 6, fig.height = 5, fig.pos="H", fig.pos = 'H')
+
+#Installing Packages 
+
+install.packages("caret")
+install.packages("tidyverse")
+install.packages("ggplot2")
+install.packages("randomForest")
+install.packages("glmnet")
+install.packages("pROC")
+install.packages("gbm")
+install.packages("class")
+install.packages("gridExtra")
+install.packages("BiocManager")
+install.packages("formattable")
+install.packages("GGally")
+install.packages("stargazer")
+install.packages("kableExtra")
+install.packages("hexbin")
+devtools::install_github("thomasp85/patchwork")
+
+```
+
+```{r Data Design, include = FALSE}
+
+rm(list = ls())
+
+pacman::p_load(tidyverse, 
+               ggplot2, 
+               gridExtra, 
+               ggridges, 
+               viridis, 
+               hrbrthemes,
+               formattable)
+
+
+# The full set
+
+Data <- read.csv("Data/Credit Default Dataset.csv")
+Data <- na.omit(Data)
+Data <- subset(Data, Amount != 0)
+
+###
+
+Data$Owed <- rowSums(Data[,c(12,13,14,15,16,17)]) # Total owed to loan
+Data <- subset(Data, Owed != 0) # cannot equal zero
+
+Data$TotalPaid <- rowSums(Data[,c(18,19,20,21,22,23)]) # how much have you paid
+
+Data$Difference <- (Data$Owed - Data$TotalPaid)/Data$Amount # how much still owed as a ratio of what you originally loaned. 
+
+Data$Interest <- (Data$Owed/Data$Amount)^2
+
+Data$Pressure <- (Data$Owed/6)/(Data$Amount/6)
+
+Data$Variance <- (rowSums(Data[,18:23])/6) - (rowSums(Data[,18:23])/6)^2
+
+# Specific Columns
+
+Data$Gender <- gsub("2", "0", Data$Gender) # 0 == Female 
+
+Data$Education <- gsub("4|5|6", "-1", Data$Education) 
+    Data$Education <- gsub("2|1", "5", Data$Education) # Uni+ = 5, HS = 2
+    Data$Education <- gsub("3", "2", Data$Education)
+
+Data$Marriage.Status <- gsub("2|3", "0", Data$Marriage.Status)# Married = 1
+
+Data$Age <- ifelse(Data$Age < 30, 1,
+                   ifelse(Data$Age >= 30 & Data$Age < 40, 2,
+                          ifelse(Data$Age >= 40 & Data$Age < 50, 3,
+                                 ifelse(Data$Age >= 50, 4, 0))))
+
+Data$Quality <- ((Data[, 6] + 
+                Data[, 7] + 
+                Data[, 8] +
+                Data[, 9] +
+                Data[, 10] +
+                Data[, 11]))/6 # pay before, on time, or late. (average)
+
+Data$Quality <- ifelse(Data$Quality < -1, 5,
+                ifelse(Data$Quality < 0 & Data$Quality >= -1, 1,
+                ifelse(Data$Quality > 0 & Data$Quality < 2, -2, 
+                ifelse(Data$Quality >= 2, -10,0))))
+
+#The Quality variable is essentially the average of how timely your payments were, were they on average half a month before, or two months late? 
+
+###
+
+names(Data) <- c("Amount",
+                  "Gender", 
+                  "Education",
+                  "Marriage",
+                  "Age",
+                  "Repayment-1",
+                  "Repayment-2",
+                  "Repayment-3",
+                  "Repayment-4",
+                  "Repayment-5",
+                  "Repayment-6",
+                  "Bill-1",
+                  "Bill-2",
+                  "Bill-3",
+                  "Bill-4",
+                  "Bill-5",
+                  "Bill-6",
+                  "Paid-1",
+                  "Paid-2",
+                  "Paid-3",
+                  "Paid-4",
+                  "Paid-5",
+                  "Paid-6",
+                  "Default",
+                  "Owed",
+                  "Payment",
+                  "Difference",
+                  "Interest",
+                  "Pressure",
+                  "Variance",
+                  "Quality")
+
+colnames(Data) <- gsub("-", "", colnames(Data))
+
+### Transitory Datasets
+
+DataPaid <- Data |> 
+  select(Paid1, Paid2, Paid3, Paid4, Paid5, Paid6) |> 
+  gather(key = "Month", value = "Amounts") |> 
+  mutate(Month = factor(Month,
+                        levels = c("Paid6", 
+                                   "Paid5", 
+                                   "Paid4", 
+                                   "Paid3", 
+                                   "Paid2", 
+                                   "Paid1"),
+                        labels = c("April", 
+                                   "May",
+                                   "June",
+                                   "July", 
+                                   "August",
+                                   "September")))
+
+DataBills <- Data |> 
+  select(Bill1, Bill2, Bill3, Bill4, Bill5, Bill6) |> 
+  gather(key = "Month", value = "Amounts") |> 
+  mutate(Month = factor(Month,
+                        levels = c("Bill6", 
+                                   "Bill5", 
+                                   "Bill4", 
+                                   "Bill3", 
+                                   "Bill2", 
+                                   "Bill1"),
+                        labels = c("April", 
+                                   "May",
+                                   "June",
+                                   "July", 
+                                   "August",
+                                   "September")))
+
+###
+
+DataAge <- Data |> 
+  select(Amount, Age) |> 
+  gather(key = "Amount", value = "Age") |> 
+  mutate(Age = factor(Age,
+                      levels = c("1",
+                                 "2",
+                                 "3",
+                                 "4"),
+                      labels = c("< 30",
+                                 "< 40",
+                                 "< 50",
+                                 "50 +")))
+
+DataGender <- Data |> 
+  select(Amount, Gender) |> 
+  gather(key = "Amount", value = "Gender") |> 
+  mutate(Gender = factor(Gender,
+                      levels = c("0",
+                                 "1"),
+                      labels = c("Female",
+                                 "Male")))
+
+DataMarriage <- Data |> 
+  select(Amount, Marriage) |> 
+  gather(key = "Amount", value = "Marriage") |> 
+  mutate(Marriage = factor(Marriage,
+                      levels = c("0",
+                                 "1"),
+                      labels = c("Unmarried",
+                                 "Married")))
+
+DataEducation <- Data |> 
+  select(Amount, Education) |> 
+  gather(key = "Amount", value = "Education") |> 
+  mutate(Education = factor(Education,
+                      levels = c("-5",
+                                 "0",
+                                 "2",
+                                 "5"),
+                      labels = c("No Schooling",
+                                 "Some Schooling",
+                                 "High School",
+                                 "University")))
+
+```
+
+```{r Functions, include = FALSE}
+
+th1 <- theme_classic() +
+  theme(
+  legend.position = "none",
+  panel.spacing = unit(0.1, "lines"),
+  strip.text.x = element_text(size = 8),
+  plot.background = element_rect(fill = "#000033"),
+  axis.text = element_text(color = "white"),
+  axis.title = element_text(color = "white"),
+  plot.title = element_text(color = "white", size = 9),
+  strip.text = element_text(color = "white"),
+  panel.background = element_rect(fill = "transparent"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.border = element_blank(),
+  plot.margin = unit(c(0,0,0,0), "lines")
+)
+
+th2 <-  theme_classic() +
+  theme(
+  legend.position = "none",
+  panel.spacing = unit(0.1, "lines"),
+  strip.text.x = element_text(size = 8),
+  plot.background = element_rect(fill = "#000033"),
+  axis.text = element_text(color = "white"),
+  axis.title = element_text(color = "white"),
+  plot.title = element_text(color = "white", size = 9),
+  strip.text = element_text(color = "white"),
+  panel.background = element_rect(fill = "transparent"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.border = element_blank(),
+  axis.line.y = element_blank(),
+  axis.text.y = element_blank())# no y axis
+
+th3 <-  theme_classic() +
+  theme(
+  legend.position = "right",
+  panel.spacing = unit(0.1, "lines"),
+  strip.text.x = element_text(size = 8),
+  plot.background = element_rect(fill = "#000033"),
+  axis.text = element_text(color = "white"),
+  axis.title = element_text(color = "white"),
+  plot.title = element_text(color = "white"),
+  strip.text = element_text(color = "white"),
+  panel.background = element_rect(fill = "transparent"),
+  panel.grid.major = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.border = element_blank(),
+  axis.line.y = element_blank(),
+  axis.text.y = element_blank())
+
+###
+
+PreGraphs <- function(x, y) {
+  
+  ggplot(
+    data = Data,
+    aes(x = {{x}}, fill = {{y}})) +
+    geom_bar(position = "fill") +
+    th2
+  
+}
+
+###
+
+PreScatter <- function(x, y, xname, yname) {
+  ggplot(Data, aes(x = {{x}}, y = {{y}})) +
+    geom_point(shape = 16, color = "pink", alpha = 0.5, size = 2.5) +
+    geom_point(shape = 16, color = "maroon", alpha = 0.1, size = 0.5) +
+    labs(x = xname, y = yname) +
+    geom_smooth(method = "lm", 
+                se = FALSE, 
+                colour = "white",
+                linewidth = 0.5) +
+    th2
+}
+
+###
+
+Ridge <- function(x, xname){
+  
+ ggplot({{x}}, aes(x = Amounts, y = Month, fill = Month)) +
+  geom_density_ridges_gradient(scale = 3, rel_min_height = 0.01) +
+  scale_fill_viridis(name = "Temp. [F]", option = "C", discrete = TRUE) +
+  labs(title = xname) +
+  xlim(0, 15000) +
+  th1
+  
+}
+
+###
+
+BoxPlot <- function(data, x, y, xname, yname, title ) {
+  
+  ggplot({{data}}, 
+         aes(x = {{x}}, 
+             y = {{y}})) +
+  geom_boxplot(fill = "pink", 
+               color = "maroon",
+               outlier.shape = 16, 
+               outlier.color = "maroon4") +
+    geom_hline(yintercept =  166149.3, 
+               linetype = "dotted", 
+               color = "white",
+               size = 0.6) +
+  labs(x = xname, 
+       y = yname) +
+  ggtitle(title) + 
+  th1
+  
+}
+
+```
+
+```{r Preliminary Plots, include = FALSE}
+
+Data[, c(32, 33, 34, 35)] <- lapply(Data[, c(2, 3, 4, 5)], factor)
+Data$Default <- as.factor(Data$Default)
+
+G1 <- PreGraphs(Gender.1, Default) + 
+  ylab("") +
+  scale_x_discrete(
+    labels = c("Female", "Male"),
+    breaks = c("0", "1"),
+    name = NULL) +
+  scale_fill_manual(
+    values = c("0" = "pink", "1" = "maroon"),
+    labels = c("0" = "No", "1" = "Yes"),
+    name = "Default?") +
+  labs(title = "Gender") +
+  th1
+
+G2 <- PreGraphs(Age.1, Default) + 
+        ylab("") +
+  scale_x_discrete(
+    labels = c("< 30", "< 40", "< 50", "50 +"),
+    breaks = c("1", "2", "3", "4"),
+    name = NULL) +
+  scale_fill_manual(
+    values = c("0" = "pink", "1" = "maroon"),
+    labels = c("0" = "No", "1" = "Yes"),
+    name = "Default?") +
+  labs(title = "Age") +
+  th1
+
+G3 <- PreGraphs(Marriage.1, Default) + 
+      ylab("") +
+  scale_x_discrete(
+    labels = c("Unmarried", "Married"),
+    breaks = c("0", "1"),
+    name = NULL) +
+  scale_fill_manual(
+    values = c("0" = "pink", "1" = "maroon"),
+    labels = c("0" = "No", "1" = "Yes"),
+    name = "Default?") +
+  labs(title = "Marital Status") +
+  th1
+
+Data$Default <- as.numeric(Data$Default) - 1
+
+###
+
+B1 <- BoxPlot(DataAge, 
+              Age, 
+              Amount, 
+              "", 
+              "", 
+              "Age Group")
+B2 <- BoxPlot(DataGender, 
+              Gender, 
+              Amount, 
+              "", 
+              "", 
+              "Gender")
+B3 <- BoxPlot(DataMarriage, 
+              Marriage, 
+              Amount, 
+              "", 
+              "", 
+              "Maritial Status")
+B4 <- BoxPlot(DataEducation, 
+              Education, 
+              Amount, 
+              "", 
+              "", 
+              "Education Level")
+
+###
+
+DFTable <- data.frame(
+  Models = c("Lasso",
+             "KNN",
+             "Forest",
+             "Voting",
+             "Logit"),
+  TPR = c(62, 75, 90, 78, 45),
+  TNR = c(75, 69, 86, 82, 91),
+  AUC = c(0.69, 0.72, 0.89, 0.79, 0.68))
+
+###
+
+```
+
+# Introduction
+
+Machine learning has well and truly entered the field of economics, and econometrics. In the modern era of ChatGPT and models that predict FIFA World Cup winners, economists may be thinking: can these things predict recessions? Can they predict shocks? I do not know whether I would argue that these algorithms are that powerful, yet. I would argue that they definitely do a better job of that than traditional econometrics. In fact, that is what I set out to do in this paper. Many might say that it is not really the goal of econometrics to predict things; rather, it is to show valid statistical relationships which can be motivated by theory as causal. This is true, and in fact, I think this is an aspect where traditional econometrics excels in comparison to machine learning: interpretation. 
+
+In this research assignment, I have analysed a data set of roughly 30 000 observations from a bank in Taiwan. The explicit target of the data is to predict whether an individual who has received a loan, will default on said loan. I have tried to answer this question using a few different approaches, namely, a basic econometric logit for comparison, and three different machine learning algorithms. A Lasso regression was used purely for automated feature selection, and its goal was not prediction. Yet, it outperformed the logit model. The k-nearest-neighbours (KNN) approach was also used, yielding more balanced results, and ones which I might have accepted as adequate had it not been for the results of the Random Forest algorithm. 
+
+The Random Forest algorithm predicted exceptionally well, for a model made by someone who had not attempted this sort of thing before. There are many caveats to this ostensible success, which are discussed throughout the paper, but the result remains nonetheless. The authors of the data set used Neural Networks to achieve an area under the ROC curve (AUC) of 0.94. It was my goal to get as close to this as possible, without doing anything close to what they did. That was the motivation for choosing the models. It is also likely that a Random Forest is about as computationally intensive as my device could handle. 
+
+This paper will discuss the various techniques, the hyper parameters, what they do, why I set them the way that I did. It will not omit important struggles along the way, and I will be transparent about the pitfalls of each model at certain points in the process. Regardless, it begins with a discussion about the data, features I engineered, features I created, and visualization of the data. I believe that these steps are as important as the models themselves, they allow the reader to view the thought process in a transparent manner. 
+
+
+# Data
+
+## Selection Bias
+
+This data set is not a random sample from the entire population of people who apply for loans. It is a sample of all people who, after intense risk management procedures, were extended loans. As such, many results will seem counter intuitive. Most of the sample is highly educated, female, married - individuals selected into this data set are already unlikely to default on loans. This has also resulted in an imbalance in the outcome variable, but that is separate to this discussion. Selection bias is important to consider, not from a prediction point of view, because the models are merely using mathematics to detect patterns, but from an *inference* point of view. Cases where the selection into the data set are important, are discussed when needed throughout the paper.
+
+## Feature Engineering 
+
+Initially, the models performed poorly. The KNN and Lasso predicted only about 25% of defaults, and about 90% of non-defaults. The Random forest predicted approximately 37% of defaults. Though it was already clear that the Random Forest algorithm might be best suited for solving this problem, it was far away from being anything that a bank might actually employ. After tuning various hyper parameters with mixed results, I decided to do some rudimentary research. I concluded that the problem may actually be found in the features I have selected - rather, the way they are constructed. I used what little domain knowledge I had in order to establish a sort of "weighting" in features. For example, economics has taught me that zero education is not  a "zero", but it is actually a negative attribute. As such, I coded it to be -1. 
+
+The rest of the levels of education are not linearly related either, with university being a 5, and high school being a 2. Other variables are coded similarly. If someone pays their loan well in advance, this is person is not simply linearly better than someone who has failed every single loan payment. In fact, someone who pays the loan in advance is also different from someone who continually pays on time (not that the latter is in any way bad). I have coded variables along this framework, where if theory would tell me that something should be a major disadvantage, it is mathematically represented in this way. This might break the rule that all variables should be similar in scale, and that would be true. Numeric features are all standardised, this means that the true gap between someone with education to university level is not 6, as is coded. The model might see this as closer to one, but relatively the difference is still larger than what it would have been if the relationship was coded as linear. 
+
+Age has also been coded into 4 major groups in order to not expose the model to noise, such as a potential case where someone is 56 years old, and a case where someone is 55. I prefer it if the model focuses on broad categories of people in similar phases of life. Namely, these phases are below 30 years old, between 30 and 40, between 40 and 50, and individuals 50 years or older. I also had to remove some potential noise from the model in certain features as they are originally coded, such as the marital status of someone actually had three levels, but I decided to turn it simply into "married" or "unmarried". I believe these changes do not only help the models, but they actual help our final interpretations. It is more proactive if the bank can classify someone as legally married or not, rather than worrying about whether they are in something "complicated". 
+
+## Feature Creation 
+
+After the removal of noise and better categorization when feature engineering, the models predicted only marginally better. Perhaps the Random Forest would have a true positive rate (TPR) of 45% and a true negative rate (TNR) of 80%. The other two were even less impressive. I decided that many of these variables can be better represented in more meaningful ways. For example, how much a person is billed per month is actually remarkably consistent, unlike how much people are paid every month. 
+
+```{r Ridges,  warning =  FALSE, fig.align = 'center', fig.cap = "Consistency of Billing vs Payment \\label{Figure1}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+grid.arrange(Ridge(DataPaid, "Amount Paid Over Time"), 
+             Ridge(DataBills, "Amount Billed Over Time"),
+                   nrow = 2)
+
+```
+
+As you can see, there is almost no variation in the average that people are billed as the months pass (the sign of a good bank, perhaps). There is a considerable shift in the average when looking at the density functions of payment. We see that those paying about 500 or 1000, higher levels, also pay incredibly consistently. This is not because it is easier to pay these amounts, but it is that these individuals were given larger loans precisely because they are so reliable (selection into the data set). People with lower loan amounts tend to vary the amount they pay, and as we can see, many of these people started to pay quite a bit more per month over time (most probably in order to catch up on missed payments). This knowledge gave me many ideas for new, meaningful features that the model may be able to utilize.  
+
+"Quality" is a feature of my design. It simply states whether, on average, someone paid the bill in advance, or how late they paid it. A score of 0.33 would mean that, on average, an individual paid one third of a month late. A score of -0.33, would be the reverse, they paid in advance. No individual could ever pay one third, or three quarters of a month in advance. It is simply a measure of their average payment habits, whether they paid duly or delayed on average over the 6 months leading up to the potential default. I believe that this variable's inclusion is relatively important in removing noise from the time variable "repayment", which changes every single month, for 6 months, depending on whether an individual was a proactive or lagged payer for the month. A general trend is more important. 
+
+I also created a feature for the total amount that someone owes over the 6 months (Owed), and the total amount they have paid (Payment). These are simply linear combinations of other features and I did not expect them to necessarily play a large role in the decision making of the algorithms. In fact, I expected them to be removed by the lasso feature selection process. However, these transitory features allowed me to create certain other features, such as "Pressure", which is simply the average amount that someone is billed in a month as a fraction of the amount of the loan over those 6 months. This is a crude measure of pressure, because the data does not include features such as income or interest rates, but I believe that this might have been a meaningful fraction. I also crafted a feature called "Interest", which is also the total amount an individual was billed as a fraction of the amount loaned - except this is squared in order to convey a non-linear relationship. These are similar, but the lasso will likely pick one. 
+
+The final feature I included is "Variance", which shows how consistently someone paid, or how often they paid different amounts. The reason for this is precisely because on average, individuals are billed a constant amount per month. If an individual pays in an unusual fashion, it might be knowledge that the algorithms can make use of. Perhaps these individuals are more likely to default, as their erratic payments are a sign of their struggle to come good on the loan, or general bad attitude towards it. 
+
+## Data Visualisation
+ 
+The inclusion of demographic features such as age, or gender can be quite difficult to justify at times, because one is making certain assumptions. In this case, I believe that the exploratory data visualization should convince one that there is enough variation in these variables that an algorithm could learn better from their presence in the model. Below, we see that there is a difference in the rate of defaults (maroon) and non-defaults (pink) between different genders, age groups, and marriage statuses. Males are more likely to default even as a proportion of their size in the sample. Married couples, strangely enough, are also proportionally more likely to default. Other than that, we see that young people and old people are more likely to default than people in the prime of their earning careers.  
+
+```{r Demographics,  warning =  FALSE, fig.align = 'center', fig.cap = "Variation in Defaults by Demographics \\label{Figure2}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+grid.arrange(G1, G2, G3, ncol = 3)
+
+```
+
+Similarly, below, we see even stronger variation in the amount an individual might be loaned based on these demographic factors. The median female is loaned more than the median male, with both of these individually being below the total average for the "Amount" variable (the variable is driven by outliers). It is not true that higher loan amounts (females) lead to fewer defaults (also females). Instead, it is more likely that the bank already knew females are less likely to default and feels more comfortable giving larger loans to these individuals. With similar reasoning, see that people in the prime of their career are loaned more than individuals starting out, or those at the tail end of their career. The bank likely already knew that these age groups are less likely to default and offers them larger packages. It is not that loan amounts are negatively related to probability of default, *ceteris paribus*.  
+
+The trend for marriage is not the same. What is interesting is that married people are more likely to default (marginally), yet they are given more access to funds. This might be because there are other more important features driving the bank's decision, and things like education, age, and so on are expected to offset this trend. The best example of selection into the data set affecting the inference should come with the Education Level Box Plot in frame 4. 
+
+It cannot be that individuals with no, or very little, schooling can be less risky to banks than individuals who attended universities, or even all levels of secondary education. It is instead that individuals in this sample who the bank felt comfortable giving loans to, despite their low education level, are likely individuals who own family businesses, farms, or have successfully proven that they are an asset to the bank. They are not the average person with no schooling. This is a prime example of the fact that the data is not unbiased, and that selection has occurred from the bank. All individuals who received loans have already been through risk management procedures, and we cannot few this sample as though it is a randomly assigned sample. A more telling fact is that, as per the original authors of the data set, about two thirds of people in this sample (people who get loans) have undergraduate degrees or more. This further adds evidence to the fact that it is not actually an advantage to have no schooling. 
+
+```{r Box Plots,  warning =  FALSE, fig.align = 'center', fig.cap = "Variation in Amount Loaned by Demographics \\label{Figure3}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+grid.arrange(B1, B2, B3, B4,
+             nrow = 2)
+
+```
+
+A major concern in this project is that many of the variables are highly correlated, as vaguely discussed in the feature engineering section. The amount that someone is billed in the penultimate month to the potential default is usually the same as the amount they were billed initially. These variables would probably be excluded by the lasso regression. Once again, payment habits are far less correlated, and the lasso is unlikely to necessarily exclude every single month from the regression. Below you can view the correlation between the first bill or payment of a specific observation, and the one preceding the potential default. 
+
+```{r Variables for Exclusion,  warning =  FALSE, fig.align = 'center', fig.cap = "Correlation Among Variables \\label{Figure4}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+grid.arrange((PreScatter(Bill1, Bill6, "Preceding Bill", "First Bill") + scale_x_continuous(labels = function(x) ifelse(x == 100000, "", x))),
+             PreScatter(Paid1, Paid6, "Preceding Payment", "First Payment"),
+             nrow = 2)
+
+```
+
+```{r Data Design Continued, include = FALSE}
+
+# Further
+
+Data <- as.data.frame(lapply(Data, as.numeric)) # Now Numeric
+
+outliers <- which(abs(scale(Data[, c(1, 5, 25, 26, 27, 28)])) > 2.5)
+Data <- Data[-outliers, ] # Removing Outliers. 
+rm(outliers)
+
+# Random Forests should be less responsive to outliers anyway but I was only getting about 64% accuracy for the (1,1) part of the confusion matrix. After this change I got about 67%... 
+
+###
+
+Q <- sum(Data$Default == 0) - sum(Data$Default == 1)
+
+Data <- Data |> 
+  filter(Default == 1) |> 
+  sample_n(Q, replace = TRUE) |> 
+  bind_rows(Data)
+
+# Shuffle the data to ensure randomness
+Data <- Data |> 
+  sample_frac() |> 
+  mutate(row_id = row_number()) |> 
+  arrange(row_id) |> 
+  select(-row_id)
+
+rm(Q)
+
+# This seems dubious but ML techniques can also be biased in imbalanced datasets. In order to use acuracy measures etc I thought it best to have a balanced dataset. 
+
+Standardised <- c(1,6:23,25:27)
+
+Process <- function(a, b) {
+  b[, a] <- scale(b[, a])
+  NewData <<- b
+} # might want to do again later.
+
+Process(Standardised, Data) # Standardised Data
+rm(Standardised)
+
+NewData <- NewData[, -c(32:35)]
+
+# Partition 
+
+library(caret)
+
+set.seed(123)
+
+Training <- createDataPartition(NewData$Default, 
+                                p = 0.76, 
+                                list = FALSE)
+Train <- NewData[Training, ]
+Test <- NewData[-Training, ]
+
+```
+
+## Basic Oversampling
+
+As mentioned before, this is an imbalanced data set. Not the worst that I have ever seen, but the algorithms can easily cheat and achieve an accuracy score of around 70% just by concluding that almost no individuals ever default on the loan. Usually, there are a few solutions to this. One can randomly over-sample, perhaps even adding some irregularities in the duplication process. One can under-sample as well. I considered both of these, but in the end, I decided that more data is far better than less in machine learning scenarios. This is the major benefit to oversampling, but it most certainly has negatives. 
+
+A glaring disadvantage is that it creates an artificially large number of duplicated data points. In an strict sense, you have created a data set that does not exist, and has never existed in the real world. This helps the algorithm detect useful patterns and actually become better at understanding the relationships in the data, but it comes at this large cost. It is no longer trained on a strictly "real world" data set, and the results must be viewed with some more caution. In order to be fully transparent, no data augmentation has been done, and the SMOTE technique is not utilized. Basic oversampling is how the data was transformed. 
+
+I also removed outliers, and standardised all variables in the set. This left us with a large correlation plot that had very few related variables. So, below, I selected the features which have a "naked eye" correlation with default status. These are not all the features considered by the lasso regression later on - for that I simply allowed it to view every single feature in the data set and come to its own conclusions. Keep an eye on which features are in the correlation plot, because many of them appear in important roles later on. Note that "Repayment1" and "Paid1" are not the first repayment status (early, late, on time) or amount. They indicate that the variable is observed one month before the potential default. 
+
+```{r Correlation Plot,  warning =  FALSE, fig.align = 'center', fig.cap = "Correlation Plot \\label{Figure5}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+library(GGally)
+
+ggcorr(
+  NewData[, -c(2:5, 7:11, 12:17, 19:23, 30, 25)],
+  method = c("everything", "pearson"),
+  low = "maroon4",
+  mid = "white",
+  high = "blue4",
+  midpoint = 0,
+  geom = "tile",
+  min_size = 1,
+  max_size = 8,
+  label_color = "white",
+  label_round = 1,
+  label_size = 4,
+  limits = c(-1, 1),
+  drop = is.null(limits) || identical(limits, FALSE),
+  layout.exp = 0,
+  legend.position = "left",
+  legend.size = 10)
+  
+
+```
+
+# Model Descriptions
+
+## Logit
+
+I did not put too much time into this logit model, as it is not the main point of the paper. It simply serves as a foundation for comparison between machine learning outcomes and those of traditional econometrics. I regressed the binary outcome variable, default, on all variables in the data set. I then excluded all those which had less than 95% significance, and was left with this subset. These variables are all incredibly significant, and unsurprising. Note that Variance having an almost zero coefficient does not mean that it has no effect on the outcome, because a logit cannot be interpreted in this way. 
+```{r Logit Model, include=FALSE}
+
+Logit <- glm(
+  Default ~ Amount + 
+                      Payment +
+                      Variance +
+                      Quality +
+                      Repayment1 +
+                      Repayment2 + 
+                      Paid1 + 
+                      Bill1 +
+                      Gender +
+                      Education +
+                      Marriage + 
+                      Age,
+  data = Train,
+  family = binomial(link = "logit")
+)
+
+PredLogit <- predict(Logit, newdata = Test)
+PredLogit <- ifelse(PredLogit >= 0.5, 1, 0)
+
+ConfLogit <- table(PredLogit, Test$Default)
+PropLogit <- prop.table(ConfLogit, margin = 2)
+
+library(jtools)
+library(kableExtra)
+
+Table <- summ(Logit)
+
+kable_table <- kable(
+  Table$coeftable, 
+  format = "html", 
+  digits = 5, 
+  align = "c") |> 
+  kable_classic_2(full_width = TRUE)
+
+```
+
+The focus of this model should not be on any particular coefficient. Rather, the point of this is to predict this model onto new data and see how well traditional statistics fares against machine learning algorithms. As such, I will not spend any more time really discussing these outcomes. What is most certainly of note is that of these variables described as "significant" by the logit model, only one is not deemed worthy of inclusion or high ranking by the machine learning algorithms, which is Variance. This is a reminder that although people find machine learning exciting, and it is better at prediction, traditional statistics still yields valid relationships between independent and dependent variables.  
+
+```{r Kable Table,  warning =  FALSE, fig.align = 'center', fig.cap = " \\label{Figure6}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+knitr::include_graphics("Images/KableTable.png",
+                        dpi = 300)
+
+```
+
+## Lasso/Feature Selection
+
+Perhaps if I had more domain knowledge I would be able to pick significant features that aid in the prediction accuracy of machine learning models myself. In such a scenario I might even end up with a better model. Instead, I have opted to use the first machine learning algorithm discussed in this paper, the Lasso regression, to automate the feature selection process for me. Lasso regression shrinks all coefficients in the model, while setting some entirely to zero. This allows us to see the smaller subset of significant indicators (Tibshirani, 1996:267). A popular alternative to this is to use Ridge regression, but this does not set any coefficients to zero and thus cannot be used for automated feature selection (Tibshirani, 1996:267). Lasso regression will also likely remove highly correlated groups of features, opting to select only one of these. My hope is that it selects some of the features I created, and that these aid in the prediction efficiency of the subsequent models. The lasso expression is as follows: 
+
+$$\min(\text{SSE} + \lambda \sum_{j=1}^{p}|\beta_{j}|)$$
+That is, that it minimizes residuals plus a penalty term. In this equation, λ essentially controls the amount of shrinkage. This means that a wide range of variables, from all variables to no variables, might be selected by the regression depending on the value of $\lambda$. This means that choosing the optimal value for $\lambda$ is an important part of hyper parameter tuning. To identify optimal $\lambda$ value we can use $k$-fold cross validation. For this procedure, I used the GlmNet package in R, setting $alpha$ = 1. When selecting the optimal lambda, I actually did not use the lambda.min option, I used the lambda.1se value. 
+
+This might correspond to a more regularized model, which is usually simpler, with fewer features selected. If one prioritizes interpretability, which a smaller set of features would be useful for, then this is desirable. Lambda.min corresponds to the model with the minimum cross-validated error. This should strictly leadS to better prediction, but it might also remove almost no predictors (making interpretation much more difficult). The setting I have chosen is also useful for tackling overfitting. Considering that this model is not used in isolation, but is essentially a feeder model for the Random Forest and KNN, I did not want it to select features which perfectly predict training data. Lamda.1se should have a better balance between bias and variance, reducing the threat of overfitting. Tibshirani (1996:279) also finds that the generalized solution gives the best prediction in that particular paper - though this is most certainly not always the case. 
+```{r Feautre Selection, include=FALSE}
+
+library(glmnet)
+
+X <- as.matrix(Train[, -24]) # Remove Target variable
+Y <- Train$Default
+
+# cross-validation
+CV <- cv.glmnet(X, Y, family = "binomial", alpha = 1)
+TrueL <- CV$lambda.1se
+
+ElasticFinal <- glmnet(X, Y, family = "binomial", alpha = 1, lambda = TrueL)
+#ElasticPlot <- glmnet(X, Y, family = "binomial", alpha = 1)
+
+# Final Features
+
+Features <- rownames(coef(
+  ElasticFinal))[coef(
+    ElasticFinal)[, 1] !=0]
+Features <-  Features[Features != "(Intercept)"]
+Features <- c("Default", Features)
+
+PredNet <- predict(ElasticFinal, newx = as.matrix(Test[, -which(names(Test) == "Default")]), type = "response")
+PredNet <- ifelse(PredNet >= 0.5, 1, 0)
+
+TrueL
+
+ConfNet <- table(PredNet, Test$Default)
+NetProp <- prop.table(ConfNet, margin = 2)
+print(NetProp)
+
+#ElasticPlot$df <- NULL
+
+```
+
+```{r Elastic Selection,  warning =  FALSE, fig.align = 'center', fig.cap = "Variable Selection \\label{Figure7}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+library(knitr)
+
+knitr::include_graphics("Images/Selection.png",
+                        dpi = 300)
+
+```
+
+```{r Lambdas,  warning =  FALSE, fig.align = 'center', fig.cap = "Lambda \\label{Figure8}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+knitr::include_graphics("Images/Lambda.png",
+                        dpi = 300)
+
+```
+
+In the above figures we see the process unfold. We see that coefficients go to zero, and that the error reduces over different lambda values. Eventually, this process yields between 17 and 19 features (from a data set of 31). This does not have to happen monotonically, the best subset of 17 may not include only variables that were in the best subset of 18 (Tibshirani, 1996:274). The reason that I did not stabilize the model and always select the same features is because there is also valuable information in seeing which features drop in or out depending on a specific run of the model, and how well the subsequent models perform as a result. 
+
+## Random Forest
+
+A Random Forest is an ensemble machine learning method which works by developing myriad decision trees during training, then averaging the results in order to predict onto new data (Scornet et. al, 2015:1716). Because of this complex structure, they do not require intervention from the economist in order to introduce non-linearities. These algorithms can detect this without having a structure imposed upon them (Grömping, 2009:308). They are random in two different ways. Each tree in the forest is learning from a random, different subset of the original data, with replacement. Secondly, each tree is based on a number of selected variables, which is not the entire sample - meaning each tree will provide different results (Grömping, 2009:311). The latter is known as *mtry*, and in this research paper it is set to the square root of the total number of variables. This was largely done because, firstly, it is common practice, and secondly, because I chose to not interact with the vector of features delivered from the lasso regression. I did not focus on the number each time and and tune between an *mtry* of 3, then 4, then 3 again. I knew that I wanted it to be somewhere between the square root and the log of the number of variables, and more often than not, the square root performed the best. 
+
+Random Forests often outperform other algorithms, such as the aforementioned lasso or the upcoming KNN. Though some studies have found that in certain situations, random forests and KNN can be substitutes for one another (Scornet et. al, 2015:1717). Unlike Lasso and similar to KNN, it is less simple to discuss the mathematics of random forests. As a result, most papers focus on special cases or on specific characteristics of the forest (Scornet et. al, 2015:1717). They are a black box to most people, including myself. In order to mitigate this feeling of powerlessness, I will discuss some of the parameters and why I have tuned them in this way. 
+
+Most research apparently sets node size to between 1 or 5 (Scornet et. al, 2015:1718). Mine is set to 20, because random forests are already an incredibly computationally intensive procedure and my computational power is not that of a research facility. Furthermore, I did not see a notable difference when running this parameter at even lower levels than 20. Node size can help the individual trees identify more complex relationships between variables, but I believe that during feature engineering and construction, I have given then algorithm much information to work with. I set the maximum depth to NULL. Finally, I have set the number of trees to 300. I found a significant improvement in prediction accuracy all the way up to about 280 trees or so, but I once ran the model with 1000 trees and this took about two hours. After those hours, the model somehow performed worse. I set the number of trees to 300 for the remainder of all tests and hyper parameter tuning. 
+```{r Random Forest, include=FALSE}
+
+library(randomForest)
+
+Train <- Train[, Features]
+Test <- Test[, Features]
+
+MLModel <- randomForest(
+  Default ~ ., 
+  data = Train, 
+  ntree = 300,
+  mtry = sqrt(ncol(Train)),
+  nodesize = 20, 
+  maxdepth = NULL)
+
+###
+
+PredTree <- predict(MLModel, newdata = Test)
+PredForPlot <- predict(MLModel, newdata = Test)
+PredTree <- ifelse(PredTree >= 0.5, 1, 0)
+
+ConfTree <- table(PredTree, Test$Default)
+PropTree <- prop.table(ConfTree, margin = 2)
+print(PropTree)
+
+VarImportance <- as.data.frame(varImpPlot(MLModel))
+
+```
+
+```{r Variable Importance,  warning =  FALSE, fig.align = 'center', fig.cap = "Variable Importance in Random Forest Classification \\label{Figure9}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+ggplot(VarImportance, 
+       aes(x =IncNodePurity, 
+           y =  reorder(rownames(VarImportance), 
+                        IncNodePurity), fill = IncNodePurity)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Importance", 
+       y = "", 
+       title = "") +
+  scale_fill_gradient(low = "pink2", 
+                      high = "maroon4") +
+  th1
+
+```
+
+Many statisticians have argued that the question of which variables are the most important is meaningless (Grömping, 2009:308). The argument would usually be that the model must be understood as a whole; a complex ecosystem where all significant betas play a role. Proponents of Random Forests, which predict much better than traditional inferential statistical methods, might vehemently disagree with this notion. One of the best aspects of this algorithm is not merely that its predicting ability is notably better than a logit, but that it actually ranks variables in conjunction with this improved performance. In this regard, it is simply a better option. The way that this model ranks importance is by average node impurity reduction. This is can be biased, because the metric has a tendency to select split variables (Grömping, 2009:311). Nevertheless, it does not seem to provide entirely counter intuitive results which must be brought into question.
+
+With each run of the model, the top three variables usually shuffle around, because they are so close together. I think of this graph in general groups. Payment, Quality, Pressure, Interest (all variables I created) are usually reasonably important. Demographic features such as age, gender, education and marital status are usually less important. The amount that someone was loaned is usually somewhere in the middle. Though it may seem like these features are entirely different from the features selected by the logit, they are in similar broad categories. These are simply the absolute best for prediction, as extracted by the lasso regression. 
+
+## K-Nearest-Neighbours
+
+The KNN could prove a useful strategy in identifying risk, due to three main reasons presented in a paper by Henley & Hand (1996:78): 
+
+<ul>
+
+  <li> Firstly, it is able to model irregularities in a risk function.</li>
+  <li> Secondly, it has been found to perform better than other non-parametric techniques (such as kernel methods) when the data is multi-dimensional.</li>
+  <li> Finally, it is an intuitive procedure easily explained to business managers looking to make use of its predictions.</li>
+  
+</ul>
+
+That being said, it performs far worse than the Random Forest on all metrics. It is also a simple model for students to use, because you essentially only tune one hyper parameter, k. I have set k to 15, because this was the level which predicted best. A value of k sets how many of these "nearest neighbors" to consider. It then classifies these observations into groups in order to better understand their probability of default, in this case. In general, smaller k levels allow for more noise to enter into the model's decision making process. I have set quite a small value for k, with my research indicating that this should be higher. Higher levels of k can lead to biased classifying by the model. I believe that the features selected by the lasso were selected in such a way that they optimize the Random Forest, and perhaps if I had run a second lasso regression to optimize the variables which best help the KNN, it might have been able to perform better. 
+```{r KNN, include=FALSE}
+
+library(class)
+
+PredKNN <- knn(
+  Train[, Features[Features != "Default"]], 
+  Test[, Features[Features != "Default"]], 
+  Train$Default, 
+  15)
+
+PredKNN <- as.numeric(PredKNN)
+PredKNN <- PredKNN -1
+
+ConfKNN <- table(PredKNN, Test$Default)
+PropKNN <- prop.table(ConfKNN, margin = 2)
+print(PropKNN)
+
+```
+```{r Preliminary Combination, include=FALSE}
+
+Votes <- ifelse(
+  PredTree == PredNet & PredNet == PredKNN, PredTree,
+  ifelse(PredTree == PredNet | PredTree == PredKNN, PredTree,
+    ifelse(PredNet == PredKNN, PredNet,
+      PredKNN
+    )
+  )
+)
+
+Combined <- table(Votes, Test$Default)
+CombConf <- prop.table(Combined, margin = 2)
+print(CombConf)
+
+```
+
+# Performance Analysis
+
+## Comparisons
+
+```{r Model Comparison,  warning =  FALSE, out.height="100%", out.width="100%"}
+
+knitr::include_graphics("Images/MLTable.png",
+                        dpi = 300)
+
+```
+
+The Random Forest algorithm outperformed all competition, by a healthy margin. It has both a TPR and TNR substantially greater than the other machine learning algorithms, totaling an Area Under the ROC Curve (AUC) of 0.89. This is excellent, but it could not reach the level of the Neural Networks' AUC proposed by the authors of the original data set (0.94). Despite this, it is a notable achievement for any algorithm to achieve this score given the lack of interest rates or salaries. I believe that all of these models would be reaching the limits of prediction if these features were included, considering that all algorithms already predict roughly two thirds or more correctly - without these features. 
+
+It is slightly unfair to evaluate the Lasso regression's performance in prediction, as its hyper-parameters were not tuned for this purpose. They were tuned in order to get the best predictions form the random forest and KNN stage. As such, I must say that the predictions are still better than a basic logit model used in econometrics. More importantly, during feature selection, it actually excluded variables that the logit deemed "significant" at the 99% level, such as Variance. The logit, on the other hand, performed far worse than any machine learning method. Once again, this comparison feels slightly unfair because it is not the goal of applied statistics to necessarily "predict" in the strict sense of machine learning. Instead, I believe the logit does show meaningful statistical relationships, and is useful for what it is designed to do (and it is much faster to do it). 
+
+The KNN is perhaps my personal greatest disappointment. It was clear from the off that it would be outperformed by the Random Forest. This makes sense, because it is not necessarily comparing apples with apples. The KNN runs in about 10 seconds, whereas the Random Forest requires a coffee break before seeing results. The forest is simply too computationally powerful, with too many meaningful parameters to tune for most other models to compete. If you have the time, and the goal of the project is to predict with hyper precision, then computationally intensive algorithms will more often than not yield the best results. As I said, if the goal is rather to explain a process simply and get quick results which "beat" basic statistics, then a KNN actually seems like an improvement. 
+
+The final "model", which is not an algorithm, simply combines all the previous machine learning predictions in a democratic voting system. Essentially, if two variables or more predict a default or a non-default, then that is the decision of the voting model. This inclusion is actually a bit of a lag, because initially, when all the models hovered around 55% - 70% TPR, the voting actually reached about 73%. So in this way, it was an improvement. After removing outliers and creating new features, the models themselves improved to such an extent that the gain was minimal. The Random Forest actually is simply better than the Voting method now. Below, you can view the ROC curves of the three algorithms. Take note of how the Random Forest outperforms both in terms of specificity and sensitivity. 
+```{r ROC Creation, include = FALSE}
+
+library(pROC)
+
+### Creation
+
+LassoROC <- roc(Test$Default, PredNet)
+KnnROC <- roc(Test$Default, PredKNN)
+ForestROC <- roc(Test$Default, PredTree)
+VotesROC <- roc(Test$Default, Votes)
+LogitROC <- roc(Test$Default, PredLogit)
+
+### Extraction
+
+Lasso <- data.frame(x = LassoROC$specificities, 
+                    y = LassoROC$sensitivities)
+Forest <- data.frame(x = ForestROC$specificities, 
+                     y = ForestROC$sensitivities)
+KNN <- data.frame(x = KnnROC$specificities, 
+                  y = KnnROC$sensitivities)
+
+# Combine data frames
+DF <- rbind(Lasso, Forest, KNN)
+DF$Method <- rep(c("Lasso", "Forest", "KNN"), each = length(Lasso$x))
+
+```
+
+```{r ROC Plots,  warning =  FALSE, fig.align = 'center', fig.cap = "ROC Plots for KNN, Lasso and Forest \\label{Figure11}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+ggplot(DF, aes(x = 1 - x, 
+               y = y, 
+               color = Method)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = 0, 
+                  ymax = y, 
+                  fill = Method), 
+              alpha = 0.35) +
+  labs(x = "False Positive Rate", 
+       y = "True Positive Rate",
+       color = "Method", 
+       fill = "Method") + 
+  scale_color_manual(values = c(
+    "Lasso" = "pink", 
+    "Forest" = "maroon4", 
+    "KNN" = "maroon")) +
+  scale_fill_manual(values = c(
+    "Lasso" = "pink", 
+    "Forest" = "maroon4", 
+    "KNN" = "maroon")) +
+  theme(
+      panel.spacing = unit(0.1, "lines"),
+      strip.text.x = element_text(
+        size = 8),
+      plot.background = element_rect(
+        fill = "#000033"),
+      axis.text = element_text(
+        color = "white"),
+      axis.title = element_text(
+        color = "white"),
+      plot.title = element_text(
+        color = "white"),
+      strip.text = element_text(
+        color = "white"),
+      panel.background = element_rect(
+        fill = "transparent"),
+      panel.grid.major = element_blank(),                
+      panel.grid.minor = element_blank())
+
+```
+
+## Predictions of the Random Forest
+
+The heat maps below show the predicted probability of default as a function of a few other independent variables, such as the amount loaned, the Pressure feature, the amount the person paid in the month preceding the potential default, and their total payments. As can be seen, some of the results make intuitive sense, and others are due to the selection process of getting a loan from the bank. For example, we see quite a high concentration of individuals who were loaned a very small amount, with an incredibly high probability of default. 
+
+This is not because a smaller amount is more difficult to deal with, and it certainly does not mean banks should extend everyone larger loans. Instead, it means that the bank only gave sizable loans to individuals who they initially deemed less likely to default, through their own internal risk management procedures. We see the opposite concentration in the payment amount preceding the potential default. A low payment before the potential default actually informed the algorithm that this person is less likely to default. I do not necessarily have an explanation for this other than that perhaps high payments indicate that someone has been lagging behind for a while and is unlikely to be able to fulfill the loan, regardless of their final attempt to uphold their agreement. 
+
+For two of the variables I created, we must remember precisely how they are coded. The fact that a low pressure would yield a low probability of default makes sense, because pressure is simply a ratio indicating how much a given person owes after 6 months relative to the initial amount they were loaned, with people owing a larger share being under more "pressure". Payment is very difficult to comprehend. Payment is the total sum of an individuals payments to the bank over these 6 months. I believe this to be an example that we cannot view these graphs as *ceteris paribus* effects. The algorithm takes into account the entire vector of an individual's attributes when constructing the default probability. 
+
+It is generally difficult to learn from this model, I must admit. The model has essentially told the bank that, the people you thought would default, such as those you gave small loans, or billed a large fraction of their total loan, are the ones who were the most likely to default. In this sense it serves as a sanity check, that the banks' internal risk management is functioning correctly. A more useful model might be one which includes only data from before the loan was given, and the loan amount. It is less useful knowing whether an individual will default once you have already extended the loan. Perhaps a data set including salaries, credit scores, and eventually interest rates on the given loan, would prove useful to banks in preventing defaults before they even become loans. 
+```{r Final Scatter Function, include=FALSE}
+
+TestScatter <- cbind(Test, PredForPlot) 
+TestScatter <- cbind(TestScatter, PredTree)
+# We can now see probability of deault as a function of a few other things.
+
+Heat <- function(x, xname) {
+  
+ ggplot(TestScatter, 
+        aes(x = {{x}}, 
+            y = PredForPlot) ) +
+ geom_hex(bins = 30, 
+          colour = NA) +
+ scale_fill_gradient(low = "#000033", 
+                     high = "purple") +
+ labs(x = xname, 
+      y = "") +
+ th1 
+  
+}
+
+H1 <- Heat(Amount, "Amount Loaned")
+H2 <- Heat(Pressure, "Pressure") + xlim(c(0,5))
+H3 <- Heat(Paid1, "Penultimate Payment Amount") + xlim(c(0,1.5))
+H4 <- Heat(Payment, "Payment Habits")  + xlim(c(0,1.5))
+
+```
+
+```{r Final Scatter,  warning =  FALSE, fig.align = 'center', fig.cap = "Heat Maps of Forest Predictions \\label{Figure12}", fig.height = 4.5, fig.width = 9, echo=FALSE}
+
+grid.arrange(H1, H2, H3, H4, nrow = 2)
+
+```
+
+# Conclusion 
+
+I have succeeded in creating at least one model that predicts relatively well. This was only after oversampling, removal of outliers, creation of features, weighting of features, and automated variable selection, but the result still stands. The usefulness of this model is debatable, considering that it, at best, would give the bank about one month to prepare for on onslaught of defaults (considering that the preceding month's variables are all very important). It also would not help a bank decide whether to give an individual a loan in the first place. In this way, it is a relatively useful model for an incredibly specific case. That being said, it would be difficult to find a model that predicts that specific situation *much* better, thought apparently Neural Networks can do that. 
+
+\newpage
+
+# Bibliography
+
+Grömping, U. 2009. Variable Importance Assessment in Regression: Linear Regression versus Random Forest. *The American Statistician*, 63(4):308-319.
+
+Henley, W. E & Hand D. J. 1996. A $k$-Nearest-Neighbour Classifier for Assessing Consumer Credit Risk. *Journal of the Royal Statistical Society. Series D (The Statistician)*, 45(1):77-95.
+
+Predict Credit Card Defaulters [Online]. [n.d.]. Available: https://www.kaggle.com/datasets/utkarshx27/default-of-credit-card-clients-dataset?resource=download (25 April 2023). 
+
+Scornet, E, Biau, G, &  Vert, J. 2015. Consistency of Random Forests. *The Annals of Statistics*, 43(4):1716-1741.
+
+Tibshirani, R. 1996. Regression Shrinkage and Selection via the Lasso. *Journal of the Royal Statistical Society. Series B (Methodological)*, 58(1):267-288.

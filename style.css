@@ -1,0 +1,27 @@
+body {
+  
+  color: white;
+  text-align: justify;
+  background-color: #000033;
+  margin-top: 10px;
+  margin-right: 5px;
+  margin-bottom: 15px;
+  margin-left: 5px;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 14px;
+
+  
+}
+
+h1 {
+  
+  text-align: left;
+  font-size: 24px;
+}
+
+ h2 {
+  
+  text-align: left;
+  font-size: 18px;
+  
+}

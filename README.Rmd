@@ -1,8 +1,7 @@
 ---
-title: "Machine Learning to Predict Credit Default"
 output: 
-  github_document:
-    css: styles.css
+ md_document:
+   variant: markdown_github
 ---
 
 Banks employ extensive risk management procedures that include far more than machine learning prediction. Nevertheless, predicting loan defaults before they occur, with a high accuracy, would at the very least be beneficial to lenders. This Master's project for the module "Data Science" seeks to ascertain how well defaults on loans can be predicted. The answer is that, with the techniques used, the best accuracy score seems to be about 89%. 

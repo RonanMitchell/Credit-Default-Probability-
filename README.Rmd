@@ -153,7 +153,7 @@ source("Code/PlotCreation.R") # creation of plots and tables.
 
 Ridge plots show you how the distribution of a variable changes over time, or by any other category. This often tells enough of a story on its own. 
 
-```{r Ridges,  warning =  FALSE}
+```{r Ridges,  warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 # Ridge plots, beautiful! Credit RGraphGallery. 
 
@@ -165,7 +165,7 @@ grid.arrange(Ridge(DataPaid, "Amount Paid Over Time"),
 
 The reason for reviewing demographics is that I wanted to ascertain whether there was enough variation between categories to include them as useful indicators to the model. 
 
-```{r Demographics,  warning =  FALSE}
+```{r Demographics,  warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 # I seriously recommend gridExtra. 
 
@@ -173,7 +173,7 @@ grid.arrange(G1, G2, G3, ncol = 3)
 
 ```
 
-```{r Box Plots,  warning =  FALSE}
+```{r Box Plots,  warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 grid.arrange(B1, B2, B3, B4, nrow = 2)
 
@@ -181,7 +181,7 @@ grid.arrange(B1, B2, B3, B4, nrow = 2)
 
 These are basic correlation plots. Uusally, you want to exclude highly correlated variables and choose only one. In this case, I am performing a LASSO regression first, regardless, so I did not do that. It is recommened that you do. 
 
-```{r Variables for Exclusion,  warning =  FALSE}
+```{r Variables for Exclusion,  warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 grid.arrange(
   
@@ -305,7 +305,7 @@ Test <- NewData[-Training, ]
 
 ## Correlation Plot 
 
-```{r warning =  FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 ggcorr(
   NewData[, -c(2:5, 7:11, 12:17, 19:23, 30, 25)],
@@ -378,7 +378,7 @@ kable_table <- kable(
 
 ```
 
-```{r warning = FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 # I used to like including images instead, because they render the same no matter what. Kable can be volatile with different knitting formats. 
 
@@ -429,7 +429,7 @@ NetProp <- prop.table(ConfNet, margin = 2)
 
 ```
 
-```{r warning =  FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 # View of the elastic net in action 
 
@@ -438,7 +438,7 @@ knitr::include_graphics("Images/Selection.png",
 
 ```
 
-```{r warning =  FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 knitr::include_graphics("Images/Lambda.png",
                         dpi = 300)
@@ -485,7 +485,7 @@ VarImportance <- as.data.frame(varImpPlot(MLModel))
 
 ```
 
-```{r warning =  FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 # Variable importance plot.
 
@@ -559,14 +559,14 @@ CombConf <- prop.table(Combined, margin = 2)
 
 # Model Comparisons 
 
-```{r warning = FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 knitr::include_graphics("Images/MLTable.png",
                         dpi = 300)
 
 ```
 
-```{r warning = FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 # I made the plots in a separate script. 
 
@@ -622,7 +622,7 @@ ggplot(DF,
 
 ```
 
-```{r warning = FALSE}
+```{r warning =  FALSE, out.height="80%", out.width="80%", fig.align='center'}
 
 TestScatter <- cbind(Test, PredForPlot) 
 TestScatter <- cbind(TestScatter, PredTree)

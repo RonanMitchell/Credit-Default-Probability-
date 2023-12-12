@@ -118,12 +118,6 @@ source("Code/Functions.R") # plotting functions I made.
 source("Code/PlotCreation.R") # creation of plots and tables. 
 ```
 
-    ## Warning: Using `size` aesthetic for lines was deprecated in ggplot2 3.4.0.
-    ## ℹ Please use `linewidth` instead.
-    ## This warning is displayed once every 8 hours.
-    ## Call `lifecycle::last_lifecycle_warnings()` to see where this warning was
-    ## generated.
-
 ## Plotting
 
 Ridge plots show you how the distribution of a variable changes over
@@ -142,7 +136,7 @@ grid.arrange(Ridge(DataPaid, "Amount Paid Over Time"),
 
     ## Picking joint bandwidth of 608
 
-<img src="README_files/figure-markdown_github/Ridges-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/Ridges-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 The reason for reviewing demographics is that I wanted to ascertain
 whether there was enough variation between categories to include them as
@@ -154,13 +148,13 @@ useful indicators to the model.
 grid.arrange(G1, G2, G3, ncol = 3)
 ```
 
-<img src="README_files/figure-markdown_github/Demographics-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/Demographics-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ``` r
 grid.arrange(B1, B2, B3, B4, nrow = 2)
 ```
 
-<img src="README_files/figure-markdown_github/Box Plots-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/Box Plots-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 These are basic correlation plots. Uusally, you want to exclude highly
 correlated variables and choose only one. In this case, I am performing
@@ -181,7 +175,7 @@ grid.arrange(
     ## `geom_smooth()` using formula = 'y ~ x'
     ## `geom_smooth()` using formula = 'y ~ x'
 
-<img src="README_files/figure-markdown_github/Variables for Exclusion-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/Variables for Exclusion-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 # Technical Data Wrangling and Editing
 
@@ -291,7 +285,7 @@ ggcorr(
   legend.size = 10)
 ```
 
-<img src="README_files/figure-markdown_github/unnamed-chunk-8-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/unnamed-chunk-8-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 # Models
 
@@ -345,10 +339,10 @@ kable_table <- kable(
 # I used to like including images instead, because they render the same no matter what. Kable can be volatile with different knitting formats. 
 
 knitr::include_graphics("Images/KableTable.png",
-                        dpi = 72)
+                        dpi = 300)
 ```
 
-<img src="Images/KableTable.png" width="100%" height="100%" />
+<img src="Images/KableTable.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ## LASSO
 
@@ -394,17 +388,17 @@ NetProp <- prop.table(ConfNet, margin = 2)
 # View of the elastic net in action 
 
 knitr::include_graphics("Images/Selection.png",
-                        dpi = 72)
+                        dpi = 300)
 ```
 
-<img src="Images/Selection.png" width="100%" height="100%" />
+<img src="Images/Selection.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ``` r
 knitr::include_graphics("Images/Lambda.png",
-                        dpi = 72)
+                        dpi = 300)
 ```
 
-<img src="Images/Lambda.png" width="100%" height="100%" />
+<img src="Images/Lambda.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ## Random Forest
 
@@ -439,16 +433,12 @@ PredTree <- ifelse(PredTree >= 0.5, 1, 0)
 
 ConfTree <- table(PredTree, Test$Default)
 PropTree <- prop.table(ConfTree, margin = 2)
-
-### Extract the variable importance so it can be plotted nicely 
-
-VarImportance <- as.data.frame(varImpPlot(MLModel))
 ```
-
-![](README_files/figure-markdown_github/unnamed-chunk-14-1.png)
 
 ``` r
 # Variable importance plot.
+
+# VarImportance is just the extracted bar graphs from the random forest model. 
 
 ggplot(VarImportance, 
        
@@ -468,7 +458,7 @@ ggplot(VarImportance,
        th1
 ```
 
-<img src="README_files/figure-markdown_github/unnamed-chunk-15-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/unnamed-chunk-16-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ## K-Nearest-Neighbours
 
@@ -517,10 +507,10 @@ CombConf <- prop.table(Combined, margin = 2)
 
 ``` r
 knitr::include_graphics("Images/MLTable.png",
-                        dpi = 72)
+                        dpi = 300)
 ```
 
-<img src="Images/MLTable.png" width="100%" height="100%" />
+<img src="Images/MLTable.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ``` r
 # I made the plots in a separate script. 
@@ -598,7 +588,7 @@ ggplot(DF,
       panel.grid.minor = element_blank())
 ```
 
-<img src="README_files/figure-markdown_github/unnamed-chunk-19-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/unnamed-chunk-20-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 ``` r
 TestScatter <- cbind(Test, PredForPlot) 
@@ -616,7 +606,7 @@ H4 <- Heat(Payment, "Payment Habits")  + xlim(c(0,1.5))
 grid.arrange(H1, H2, H3, H4, nrow = 2)
 ```
 
-<img src="README_files/figure-markdown_github/unnamed-chunk-20-1.png" width="100%" height="100%" />
+<img src="README_files/figure-markdown_github/unnamed-chunk-21-1.png" width="80%" height="80%" style="display: block; margin: auto;" />
 
 # Bibliography
 

@@ -1,8 +1,10 @@
 ---
+title: "Machine Learning to Predict Credit Default"
 output: 
- md_document:
-   variant: markdown_github
+  github_document:
+    css: styles.css
 ---
+
 Banks employ extensive risk management procedures that include far more than machine learning prediction. Nevertheless, predicting loan defaults before they occur, with a high accuracy, would at the very least be beneficial to lenders. This Master's project for the module "Data Science" seeks to ascertain how well defaults on loans can be predicted. The answer is that, with the techniques used, the best accuracy score seems to be about 89%. 
 
 The purpose of this README is to provide a basic machine learning procedure, from receiving the data to prediction. This includes a Random Forest model (89% accuracy), K-Nearest-Neighbors (KNN) and a LASSO regression. These are compared to a standard statistical/econometric logit model (with a low accuracy). The models are all tasked with predicting whether a person will default on a loan, or not, the month before the loan is due. 
@@ -136,7 +138,7 @@ Data <-
 
 ## Sourcing Functions, Plots, and Tables. 
 
-```{r }
+```{r warning=FALSE}
 
 source("Code/TransitorySets.R") # data sets for plotting 
 
@@ -152,7 +154,7 @@ source("Code/PlotCreation.R") # creation of plots and tables.
 
 Ridge plots show you how the distribution of a variable changes over time, or by any other category. This often tells enough of a story on its own. 
 
-```{r Ridges,  warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r Ridges,  warning =  FALSE}
 
 # Ridge plots, beautiful! Credit RGraphGallery. 
 
@@ -164,7 +166,7 @@ grid.arrange(Ridge(DataPaid, "Amount Paid Over Time"),
 
 The reason for reviewing demographics is that I wanted to ascertain whether there was enough variation between categories to include them as useful indicators to the model. 
 
-```{r Demographics,  warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r Demographics,  warning =  FALSE}
 
 # I seriously recommend gridExtra. 
 
@@ -172,7 +174,7 @@ grid.arrange(G1, G2, G3, ncol = 3)
 
 ```
 
-```{r Box Plots,  warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r Box Plots,  warning =  FALSE}
 
 grid.arrange(B1, B2, B3, B4, nrow = 2)
 
@@ -180,7 +182,7 @@ grid.arrange(B1, B2, B3, B4, nrow = 2)
 
 These are basic correlation plots. Uusally, you want to exclude highly correlated variables and choose only one. In this case, I am performing a LASSO regression first, regardless, so I did not do that. It is recommened that you do. 
 
-```{r Variables for Exclusion,  warning =  FALSE , out.height="100%", out.width= "100%"}
+```{r Variables for Exclusion,  warning =  FALSE}
 
 grid.arrange(
   
@@ -304,7 +306,7 @@ Test <- NewData[-Training, ]
 
 ## Correlation Plot 
 
-```{r warning =  FALSE , out.height="100%", out.width= "100%"}
+```{r warning =  FALSE}
 
 ggcorr(
   NewData[, -c(2:5, 7:11, 12:17, 19:23, 30, 25)],
@@ -377,12 +379,12 @@ kable_table <- kable(
 
 ```
 
-```{r warning = FALSE, out.height="100%", out.width= "100%"}
+```{r warning = FALSE}
 
 # I used to like including images instead, because they render the same no matter what. Kable can be volatile with different knitting formats. 
 
 knitr::include_graphics("Images/KableTable.png",
-                        dpi = 72)
+                        dpi = 300)
 
 ```
 
@@ -428,19 +430,19 @@ NetProp <- prop.table(ConfNet, margin = 2)
 
 ```
 
-```{r warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r warning =  FALSE}
 
 # View of the elastic net in action 
 
 knitr::include_graphics("Images/Selection.png",
-                        dpi = 72)
+                        dpi = 300)
 
 ```
 
-```{r warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r warning =  FALSE}
 
 knitr::include_graphics("Images/Lambda.png",
-                        dpi = 72)
+                        dpi = 300)
 
 ```
 
@@ -474,15 +476,21 @@ PredTree <- ifelse(PredTree >= 0.5, 1, 0)
 ConfTree <- table(PredTree, Test$Default)
 PropTree <- prop.table(ConfTree, margin = 2)
 
+```
+
+```{r include=FALSE}
+
 ### Extract the variable importance so it can be plotted nicely 
 
 VarImportance <- as.data.frame(varImpPlot(MLModel))
 
 ```
 
-```{r warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r warning =  FALSE}
 
 # Variable importance plot.
+
+# VarImportance is just the extracted bar graphs from the random forest model. 
 
 ggplot(VarImportance, 
        
@@ -552,14 +560,14 @@ CombConf <- prop.table(Combined, margin = 2)
 
 # Model Comparisons 
 
-```{r warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r warning = FALSE}
 
 knitr::include_graphics("Images/MLTable.png",
-                        dpi = 72)
+                        dpi = 300)
 
 ```
 
-```{r warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r warning = FALSE}
 
 # I made the plots in a separate script. 
 
@@ -615,7 +623,7 @@ ggplot(DF,
 
 ```
 
-```{r warning =  FALSE, out.height="100%", out.width= "100%"}
+```{r warning = FALSE}
 
 TestScatter <- cbind(Test, PredForPlot) 
 TestScatter <- cbind(TestScatter, PredTree)
